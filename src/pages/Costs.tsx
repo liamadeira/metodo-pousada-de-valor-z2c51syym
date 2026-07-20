@@ -12,33 +12,68 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
-import { Plus, Copy } from 'lucide-react'
-import { Input } from '@/components/ui/input'
+import { Plus } from 'lucide-react'
+import { LaundryManager } from '@/components/LaundryManager'
+import { BreakfastManager } from '@/components/BreakfastManager'
 
 export default function Costs() {
-  const { currentPropertyId, fixedCosts, variableCosts, duplicateCostsFromLastMonth } =
+  const { currentPropertyId, fixedCosts, variableCosts, addFixedCost, addVariableCost } =
     useAppStore()
+  const [showFixedForm, setShowFixedForm] = useState(false)
+  const [showVarForm, setShowVarForm] = useState(false)
+  const [fixedName, setFixedName] = useState('')
+  const [fixedAmount, setFixedAmount] = useState(0)
+  const [fixedCategory, setFixedCategory] = useState('')
+  const [varName, setVarName] = useState('')
+  const [varPerGuest, setVarPerGuest] = useState(0)
+  const [varPerStay, setVarPerStay] = useState(0)
 
   const propFixed = fixedCosts.filter((c) => c.propertyId === currentPropertyId)
   const propVar = variableCosts.filter((c) => c.propertyId === currentPropertyId)
 
+  const handleAddFixed = () => {
+    if (!fixedName) return
+    addFixedCost({
+      propertyId: currentPropertyId,
+      name: fixedName,
+      amount: fixedAmount,
+      category: fixedCategory || 'Geral',
+    })
+    setFixedName('')
+    setFixedAmount(0)
+    setFixedCategory('')
+    setShowFixedForm(false)
+  }
+
+  const handleAddVar = () => {
+    if (!varName) return
+    addVariableCost({
+      propertyId: currentPropertyId,
+      name: varName,
+      amountPerGuest: varPerGuest,
+      amountPerStay: varPerStay,
+    })
+    setVarName('')
+    setVarPerGuest(0)
+    setVarPerStay(0)
+    setShowVarForm(false)
+  }
+
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Gestão de Custos</h1>
-          <p className="text-muted-foreground">Controle despesas fixas, variáveis e equipe.</p>
-        </div>
-        <Button variant="outline" onClick={duplicateCostsFromLastMonth} className="gap-2">
-          <Copy className="w-4 h-4" />
-          Copiar do Mês Anterior
-        </Button>
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">Gestão de Custos</h1>
+        <p className="text-muted-foreground">
+          Despesas fixas, variáveis, lavanderia e café da manhã.
+        </p>
       </div>
 
       <Tabs defaultValue="fixed" className="w-full">
-        <TabsList className="grid w-full md:w-auto grid-cols-3 md:inline-flex">
-          <TabsTrigger value="fixed">Custos Fixos</TabsTrigger>
+        <TabsList className="grid w-full md:w-auto grid-cols-3 md:inline-flex md:grid-cols-5">
+          <TabsTrigger value="fixed">Fixos</TabsTrigger>
           <TabsTrigger value="variable">Variáveis</TabsTrigger>
+          <TabsTrigger value="laundry">Lavanderia</TabsTrigger>
+          <TabsTrigger value="breakfast">Café da Manhã</TabsTrigger>
           <TabsTrigger value="staff">Equipe</TabsTrigger>
         </TabsList>
 
@@ -47,35 +82,59 @@ export default function Costs() {
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
                 <CardTitle>Custos Fixos Recorrentes</CardTitle>
-                <CardDescription>
-                  Despesas que ocorrem independentemente da ocupação.
-                </CardDescription>
+                <CardDescription>Despesas independentes da ocupação.</CardDescription>
               </div>
-              <Button size="sm" className="gap-2">
+              <Button size="sm" className="gap-2" onClick={() => setShowFixedForm(!showFixedForm)}>
                 <Plus className="w-4 h-4" /> Adicionar
               </Button>
             </CardHeader>
             <CardContent>
+              {showFixedForm && (
+                <div className="flex gap-2 mb-4 p-4 border rounded-lg">
+                  <input
+                    className="border rounded px-2 py-1 flex-1"
+                    placeholder="Nome"
+                    value={fixedName}
+                    onChange={(e) => setFixedName(e.target.value)}
+                  />
+                  <input
+                    className="border rounded px-2 py-1 w-32"
+                    type="number"
+                    placeholder="Valor"
+                    value={fixedAmount}
+                    onChange={(e) => setFixedAmount(Number(e.target.value))}
+                  />
+                  <input
+                    className="border rounded px-2 py-1 w-40"
+                    placeholder="Categoria"
+                    value={fixedCategory}
+                    onChange={(e) => setFixedCategory(e.target.value)}
+                  />
+                  <Button size="sm" onClick={handleAddFixed}>
+                    OK
+                  </Button>
+                </div>
+              )}
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Nome da Despesa</TableHead>
+                    <TableHead>Nome</TableHead>
                     <TableHead>Categoria</TableHead>
-                    <TableHead className="text-right">Valor (R$)</TableHead>
+                    <TableHead className="text-right">Valor</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {propFixed.map((cost) => (
-                    <TableRow key={cost.id}>
-                      <TableCell className="font-medium">{cost.name}</TableCell>
-                      <TableCell>{cost.category}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(cost.amount)}</TableCell>
+                  {propFixed.map((c) => (
+                    <TableRow key={c.id}>
+                      <TableCell className="font-medium">{c.name}</TableCell>
+                      <TableCell>{c.category}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(c.amount)}</TableCell>
                     </TableRow>
                   ))}
                   <TableRow className="font-bold bg-muted/50">
                     <TableCell colSpan={2}>Total Fixo</TableCell>
                     <TableCell className="text-right">
-                      {formatCurrency(propFixed.reduce((sum, c) => sum + c.amount, 0))}
+                      {formatCurrency(propFixed.reduce((s, c) => s + c.amount, 0))}
                     </TableCell>
                   </TableRow>
                 </TableBody>
@@ -89,32 +148,57 @@ export default function Costs() {
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
                 <CardTitle>Custos Variáveis</CardTitle>
-                <CardDescription>
-                  Despesas diretamente ligadas ao número de hóspedes ou estadias.
-                </CardDescription>
+                <CardDescription>Despesas ligadas a hóspedes/estadias.</CardDescription>
               </div>
-              <Button size="sm" className="gap-2">
+              <Button size="sm" className="gap-2" onClick={() => setShowVarForm(!showVarForm)}>
                 <Plus className="w-4 h-4" /> Adicionar
               </Button>
             </CardHeader>
             <CardContent>
+              {showVarForm && (
+                <div className="flex gap-2 mb-4 p-4 border rounded-lg">
+                  <input
+                    className="border rounded px-2 py-1 flex-1"
+                    placeholder="Nome"
+                    value={varName}
+                    onChange={(e) => setVarName(e.target.value)}
+                  />
+                  <input
+                    className="border rounded px-2 py-1 w-32"
+                    type="number"
+                    placeholder="Por hóspede"
+                    value={varPerGuest}
+                    onChange={(e) => setVarPerGuest(Number(e.target.value))}
+                  />
+                  <input
+                    className="border rounded px-2 py-1 w-32"
+                    type="number"
+                    placeholder="Por estadia"
+                    value={varPerStay}
+                    onChange={(e) => setVarPerStay(Number(e.target.value))}
+                  />
+                  <Button size="sm" onClick={handleAddVar}>
+                    OK
+                  </Button>
+                </div>
+              )}
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Item</TableHead>
-                    <TableHead className="text-right">Custo por Hóspede</TableHead>
-                    <TableHead className="text-right">Custo por Estadia (Quarto)</TableHead>
+                    <TableHead className="text-right">Por Hóspede</TableHead>
+                    <TableHead className="text-right">Por Estadia</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {propVar.map((cost) => (
-                    <TableRow key={cost.id}>
-                      <TableCell className="font-medium">{cost.name}</TableCell>
+                  {propVar.map((c) => (
+                    <TableRow key={c.id}>
+                      <TableCell className="font-medium">{c.name}</TableCell>
                       <TableCell className="text-right">
-                        {formatCurrency(cost.amountPerGuest)}
+                        {formatCurrency(c.amountPerGuest)}
                       </TableCell>
                       <TableCell className="text-right">
-                        {formatCurrency(cost.amountPerStay)}
+                        {formatCurrency(c.amountPerStay)}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -124,16 +208,20 @@ export default function Costs() {
           </Card>
         </TabsContent>
 
+        <TabsContent value="laundry" className="mt-6">
+          <LaundryManager />
+        </TabsContent>
+        <TabsContent value="breakfast" className="mt-6">
+          <BreakfastManager />
+        </TabsContent>
         <TabsContent value="staff" className="mt-6">
           <Card>
             <CardHeader>
-              <CardTitle>Custo de Hora Produtiva (Em Breve)</CardTitle>
-              <CardDescription>
-                Módulo avançado para cálculo de folha e rateio de camareiras.
-              </CardDescription>
+              <CardTitle>Gestão de Equipe (Em Breve)</CardTitle>
+              <CardDescription>Módulo para cálculo de folha e rateio.</CardDescription>
             </CardHeader>
             <CardContent className="h-32 flex items-center justify-center text-muted-foreground border-2 border-dashed rounded-lg m-6">
-              Módulo de Gestão de Equipe estará disponível na próxima versão.
+              Disponível na próxima versão.
             </CardContent>
           </Card>
         </TabsContent>

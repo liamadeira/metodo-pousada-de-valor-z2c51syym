@@ -1,136 +1,305 @@
 import { useState, useMemo } from 'react'
 import useAppStore from '@/stores/use-app-store'
-import { calculatePrices } from '@/lib/calculations'
+import { calculateScenarioPrices, calculateReverseSimulation } from '@/lib/calculations'
 import { formatCurrency, formatPercent } from '@/lib/formatters'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { evaluatePrice } from '@/lib/price-utils'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Slider } from '@/components/ui/slider'
 import { Label } from '@/components/ui/label'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { SmartAlert } from '@/components/SmartAlert'
 
 export default function Simulator() {
-  const { properties, currentPropertyId, fixedCosts, variableCosts } = useAppStore()
-
+  const { properties, currentPropertyId, fixedCosts, variableCosts, channels, paymentMethods } =
+    useAppStore()
   const property = properties.find((p) => p.id === currentPropertyId)
   const propFixed = fixedCosts.filter((c) => c.propertyId === currentPropertyId)
   const propVar = variableCosts.filter((c) => c.propertyId === currentPropertyId)
+  const propChannels = channels.filter((c) => c.propertyId === currentPropertyId)
+  const propPayments = paymentMethods.filter((pm) => pm.propertyId === currentPropertyId)
 
-  const [occupancyRate, setOccupancyRate] = useState(50)
-  const [adr, setAdr] = useState(300)
+  const [mode, setMode] = useState<'direct' | 'reverse'>('direct')
+  const [occupancy, setOccupancy] = useState(50)
+  const [margin, setMargin] = useState(property?.desiredMargin ?? 20)
+  const [testPrice, setTestPrice] = useState(300)
+  const [channelId, setChannelId] = useState(propChannels[0]?.id ?? '')
+  const [paymentId, setPaymentId] = useState(propPayments[0]?.id ?? '')
 
-  const prices = useMemo(() => {
+  const selectedChannel = propChannels.find((c) => c.id === channelId)
+  const selectedPayment = propPayments.find((pm) => pm.id === paymentId)
+
+  const directResult = useMemo(() => {
     if (!property) return null
-    return calculatePrices(property, propFixed, propVar)
-  }, [property, propFixed, propVar])
+    return calculateScenarioPrices(
+      { ...property, desiredMargin: margin },
+      propFixed,
+      propVar,
+      occupancy,
+      selectedChannel,
+      selectedPayment,
+    )
+  }, [property, propFixed, propVar, occupancy, margin, selectedChannel, selectedPayment])
 
-  if (!property || !prices) return null
+  const reverseResult = useMemo(() => {
+    if (!property || !directResult) return null
+    return calculateReverseSimulation(
+      property,
+      propFixed,
+      propVar,
+      testPrice,
+      occupancy,
+      selectedChannel,
+      selectedPayment,
+      directResult.sustainablePrice,
+      directResult.idealPrice,
+    )
+  }, [
+    property,
+    propFixed,
+    propVar,
+    testPrice,
+    occupancy,
+    selectedChannel,
+    selectedPayment,
+    directResult,
+  ])
 
-  const totalAvailableRooms = property.rooms * 30
-  const simulatedRoomsSold = totalAvailableRooms * (occupancyRate / 100)
-  const simulatedRevenue = simulatedRoomsSold * adr
-  const simulatedVariableCosts = simulatedRoomsSold * prices.variablePerRoom
-  const simulatedTaxes = simulatedRevenue * (property.taxRegime / 100)
+  if (!property || !directResult || !reverseResult) return null
 
-  const simulatedProfit =
-    simulatedRevenue - prices.totalFixed - simulatedVariableCosts - simulatedTaxes
-  const simulatedMargin = simulatedRevenue > 0 ? (simulatedProfit / simulatedRevenue) * 100 : 0
+  const channelSelect = (
+    <div className="space-y-2">
+      <Label>Canal de Venda</Label>
+      <Select value={channelId} onValueChange={setChannelId}>
+        <SelectTrigger>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {propChannels.map((c) => (
+            <SelectItem key={c.id} value={c.id}>
+              {c.name} ({c.commissionPercent}%)
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  )
+  const paymentSelect = (
+    <div className="space-y-2">
+      <Label>Forma de Pagamento</Label>
+      <Select value={paymentId} onValueChange={setPaymentId}>
+        <SelectTrigger>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {propPayments.map((pm) => (
+            <SelectItem key={pm.id} value={pm.id}>
+              {pm.name} ({pm.feePercent}%)
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  )
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Simulador de Cenários</h1>
-        <p className="text-muted-foreground">Brinque com os números para prever a lucratividade.</p>
+        <h1 className="text-3xl font-bold tracking-tight">Simulador de Preços</h1>
+        <p className="text-muted-foreground">
+          Modo direto (encontrar preço) ou reverso (testar preço).
+        </p>
       </div>
 
-      <div className="grid md:grid-cols-2 gap-6">
-        <Card className="h-fit">
-          <CardHeader>
-            <CardTitle>Ajuste as Variáveis</CardTitle>
-            <CardDescription>Mova os controles para ver o impacto em tempo real.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-8">
-            <div className="space-y-4">
-              <div className="flex justify-between">
-                <Label className="text-base">Taxa de Ocupação Estimada</Label>
-                <span className="font-bold text-primary">{occupancyRate}%</span>
-              </div>
-              <Slider
-                value={[occupancyRate]}
-                onValueChange={(v) => setOccupancyRate(v[0])}
-                max={100}
-                step={1}
-              />
-              <p className="text-xs text-muted-foreground text-right">
-                {Math.round(simulatedRoomsSold)} diárias / mês
-              </p>
-            </div>
+      <Tabs value={mode} onValueChange={(v) => setMode(v as 'direct' | 'reverse')}>
+        <TabsList className="grid w-full md:w-auto grid-cols-2">
+          <TabsTrigger value="direct">Encontrar Preço</TabsTrigger>
+          <TabsTrigger value="reverse">Testar Preço</TabsTrigger>
+        </TabsList>
 
-            <div className="space-y-4">
-              <div className="flex justify-between">
-                <Label className="text-base">Diária Média Praticada (ADR)</Label>
-                <span className="font-bold text-primary">{formatCurrency(adr)}</span>
-              </div>
-              <Slider
-                value={[adr]}
-                onValueChange={(v) => setAdr(v[0])}
-                min={50}
-                max={1500}
-                step={10}
-              />
-              <p className="text-xs text-muted-foreground text-right">
-                Preço Ideal Recomendado: {formatCurrency(prices.idealPrice)}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="grid md:grid-cols-2 gap-6 mt-6">
+          <Card className="h-fit">
+            <CardHeader>
+              <CardTitle>{mode === 'direct' ? 'Variáveis de Cálculo' : 'Preço de Teste'}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {mode === 'direct' ? (
+                <>
+                  <div className="space-y-4">
+                    <div className="flex justify-between">
+                      <Label className="text-base">Ocupação Alvo</Label>
+                      <span className="font-bold text-primary">{occupancy}%</span>
+                    </div>
+                    <Slider
+                      value={[occupancy]}
+                      onValueChange={(v) => setOccupancy(v[0])}
+                      min={20}
+                      max={100}
+                      step={5}
+                    />
+                  </div>
+                  <div className="space-y-4">
+                    <div className="flex justify-between">
+                      <Label className="text-base">Margem Desejada</Label>
+                      <span className="font-bold text-primary">{margin}%</span>
+                    </div>
+                    <Slider
+                      value={[margin]}
+                      onValueChange={(v) => setMargin(v[0])}
+                      min={0}
+                      max={50}
+                      step={1}
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="space-y-4">
+                    <div className="flex justify-between">
+                      <Label className="text-base">Preço Testado (ADR)</Label>
+                      <span className="font-bold text-primary">{formatCurrency(testPrice)}</span>
+                    </div>
+                    <Slider
+                      value={[testPrice]}
+                      onValueChange={(v) => setTestPrice(v[0])}
+                      min={50}
+                      max={2000}
+                      step={10}
+                    />
+                  </div>
+                  <div className="space-y-4">
+                    <div className="flex justify-between">
+                      <Label className="text-base">Ocupação de Referência</Label>
+                      <span className="font-bold text-primary">{occupancy}%</span>
+                    </div>
+                    <Slider
+                      value={[occupancy]}
+                      onValueChange={(v) => setOccupancy(v[0])}
+                      min={20}
+                      max={100}
+                      step={5}
+                    />
+                  </div>
+                </>
+              )}
+              {channelSelect}
+              {paymentSelect}
+            </CardContent>
+          </Card>
 
-        <Card className="bg-slate-900 text-slate-50 dark:bg-card dark:text-card-foreground">
-          <CardHeader>
-            <CardTitle>Resultado Projetado</CardTitle>
-            <CardDescription className="text-slate-400 dark:text-muted-foreground">
-              Projeção mensal baseada nos valores ao lado.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="flex justify-between items-end border-b border-slate-800 dark:border-border pb-4">
-              <span className="text-slate-300">Receita Bruta</span>
-              <span className="text-2xl font-bold">{formatCurrency(simulatedRevenue)}</span>
-            </div>
+          <TabsContent value="direct" className="mt-0">
+            <Card className="bg-slate-900 text-slate-50 dark:bg-card dark:text-card-foreground">
+              <CardHeader>
+                <CardTitle>Preços Recomendados</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex justify-between border-b border-slate-800 dark:border-border pb-3">
+                  <span className="text-slate-300">Emergência</span>
+                  <span className="font-bold text-rose-400">
+                    {formatCurrency(directResult.emergencyPrice)}
+                  </span>
+                </div>
+                <div className="flex justify-between border-b border-slate-800 dark:border-border pb-3">
+                  <span className="text-slate-300">Sustentável</span>
+                  <span className="font-bold text-amber-400">
+                    {formatCurrency(directResult.sustainablePrice)}
+                  </span>
+                </div>
+                <div className="flex justify-between border-b border-slate-800 dark:border-border pb-3">
+                  <span className="text-slate-300">Ideal ({margin}%)</span>
+                  <span className="font-bold text-emerald-400">
+                    {formatCurrency(directResult.idealPrice)}
+                  </span>
+                </div>
+                <div className="pt-2 space-y-2 text-sm text-slate-400 dark:text-muted-foreground">
+                  <div className="flex justify-between">
+                    <span>Diárias vendidas (sim.)</span>
+                    <span>{Math.round(directResult.soldDays)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Custo fixo/diária</span>
+                    <span>{formatCurrency(directResult.fixedCostAbsorption)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Lucro projetado</span>
+                    <span
+                      className={directResult.profit >= 0 ? 'text-emerald-400' : 'text-rose-400'}
+                    >
+                      {formatCurrency(directResult.profit)}
+                    </span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
 
-            <div className="space-y-2 text-sm text-slate-400 dark:text-muted-foreground">
-              <div className="flex justify-between">
-                <span>(-) Custos Fixos Totais</span>
-                <span>{formatCurrency(prices.totalFixed)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>(-) Custos Variáveis Projetados</span>
-                <span>{formatCurrency(simulatedVariableCosts)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>(-) Impostos Projetados</span>
-                <span>{formatCurrency(simulatedTaxes)}</span>
-              </div>
-            </div>
-
-            <div className="pt-4 border-t border-slate-800 dark:border-border mt-6">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-lg font-medium">Lucro Líquido Projetado</span>
-                <span
-                  className={`text-3xl font-bold ${simulatedProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}
-                >
-                  {formatCurrency(simulatedProfit)}
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-slate-400">Margem Real</span>
-                <span
-                  className={`font-bold ${simulatedMargin >= property.desiredMargin ? 'text-emerald-400' : 'text-amber-400'}`}
-                >
-                  {formatPercent(simulatedMargin)}
-                </span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+          <TabsContent value="reverse" className="mt-0 space-y-4">
+            <SmartAlert
+              status={reverseResult.status}
+              title={`Avaliação: ${evaluatePrice(testPrice, directResult.sustainablePrice, directResult.idealPrice).label}`}
+              description={
+                evaluatePrice(testPrice, directResult.sustainablePrice, directResult.idealPrice)
+                  .description
+              }
+            />
+            <Card>
+              <CardHeader>
+                <CardTitle>Análise do Preço</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex justify-between border-b pb-2">
+                  <span className="text-muted-foreground">Receita Líquida/Diária</span>
+                  <span className="font-bold">
+                    {formatCurrency(reverseResult.netRevenuePerDay)}
+                  </span>
+                </div>
+                <div className="flex justify-between border-b pb-2">
+                  <span className="text-muted-foreground">Margem de Contribuição</span>
+                  <span className="font-bold">
+                    {formatCurrency(reverseResult.contributionMargin)}
+                  </span>
+                </div>
+                <div className="flex justify-between border-b pb-2">
+                  <span className="text-muted-foreground">Ocupação de Equilíbrio</span>
+                  <span
+                    className={`font-bold ${reverseResult.equilibriumOccupancy > 70 ? 'text-rose-600' : 'text-emerald-600'}`}
+                  >
+                    {formatPercent(reverseResult.equilibriumOccupancy)}
+                  </span>
+                </div>
+                <div className="flex justify-between border-b pb-2">
+                  <span className="text-muted-foreground">Lucro a {occupancy}%</span>
+                  <span
+                    className={`font-bold ${reverseResult.profitAtTarget >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}
+                  >
+                    {formatCurrency(reverseResult.profitAtTarget)}
+                  </span>
+                </div>
+                <div className="pt-2 space-y-1 text-sm text-muted-foreground">
+                  <div className="flex justify-between">
+                    <span>(-) Comissão</span>
+                    <span>{formatCurrency(reverseResult.commissionAmount)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>(-) Taxa pagamento</span>
+                    <span>{formatCurrency(reverseResult.paymentFeeAmount)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>(-) Impostos</span>
+                    <span>{formatCurrency(reverseResult.taxAmount)}</span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </div>
+      </Tabs>
     </div>
   )
 }
