@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button'
 import { Plus } from 'lucide-react'
 import { LaundryManager } from '@/components/LaundryManager'
 import { BreakfastManager } from '@/components/BreakfastManager'
+import { CategoryManager } from '@/components/CategoryManager'
 
 export default function Costs() {
   const { currentPropertyId, fixedCosts, variableCosts, addFixedCost, addVariableCost } =
@@ -69,9 +70,10 @@ export default function Costs() {
       </div>
 
       <Tabs defaultValue="fixed" className="w-full">
-        <TabsList className="grid w-full md:w-auto grid-cols-3 md:inline-flex md:grid-cols-5">
+        <TabsList className="grid w-full md:w-auto grid-cols-3 md:inline-flex md:grid-cols-6">
           <TabsTrigger value="fixed">Fixos</TabsTrigger>
           <TabsTrigger value="variable">Variáveis</TabsTrigger>
+          <TabsTrigger value="categories">Categorias</TabsTrigger>
           <TabsTrigger value="laundry">Lavanderia</TabsTrigger>
           <TabsTrigger value="breakfast">Café da Manhã</TabsTrigger>
           <TabsTrigger value="staff">Equipe</TabsTrigger>
@@ -208,6 +210,9 @@ export default function Costs() {
           </Card>
         </TabsContent>
 
+        <TabsContent value="categories" className="mt-6">
+          <CategoryManager />
+        </TabsContent>
         <TabsContent value="laundry" className="mt-6">
           <LaundryManager />
         </TabsContent>

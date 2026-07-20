@@ -10,6 +10,7 @@ import {
   LaundryKit,
   BreakfastSetting,
   SavedSimulation,
+  RoomCategory,
 } from '@/lib/calculations'
 import {
   initialProperties,
@@ -21,6 +22,7 @@ import {
   initialLaundryPieces,
   initialLaundryKits,
   initialBreakfastSettings,
+  initialRoomCategories,
 } from '@/lib/mock-data'
 
 interface AppState {
@@ -44,6 +46,10 @@ interface AppState {
   breakfastSettings: BreakfastSetting[]
   savedSimulations: SavedSimulation[]
   addSavedSimulation: (s: Omit<SavedSimulation, 'id'>) => void
+  roomCategories: RoomCategory[]
+  addRoomCategory: (cat: Omit<RoomCategory, 'id'>) => void
+  updateRoomCategory: (id: string, data: Partial<RoomCategory>) => void
+  deleteRoomCategory: (id: string) => void
 }
 
 const genId = () => Math.random().toString(36).substr(2, 9)
@@ -62,6 +68,7 @@ export const AppStoreProvider = ({ children }: { children: React.ReactNode }) =>
   const [laundryKits] = useState<LaundryKit[]>(initialLaundryKits)
   const [breakfastSettings] = useState<BreakfastSetting[]>(initialBreakfastSettings)
   const [savedSimulations, setSavedSimulations] = useState<SavedSimulation[]>([])
+  const [roomCategories, setRoomCategories] = useState<RoomCategory[]>(initialRoomCategories)
 
   useEffect(() => {
     const timer = setTimeout(() => setIsLoading(false), 600)
@@ -87,6 +94,12 @@ export const AppStoreProvider = ({ children }: { children: React.ReactNode }) =>
   const deleteScenario = (id: string) => setScenarios((prev) => prev.filter((s) => s.id !== id))
   const addSavedSimulation = (s: Omit<SavedSimulation, 'id'>) =>
     setSavedSimulations((prev) => [...prev, { ...s, id: genId() }])
+  const addRoomCategory = (cat: Omit<RoomCategory, 'id'>) =>
+    setRoomCategories((prev) => [...prev, { ...cat, id: genId() }])
+  const updateRoomCategory = (id: string, data: Partial<RoomCategory>) =>
+    setRoomCategories((prev) => prev.map((c) => (c.id === id ? { ...c, ...data } : c)))
+  const deleteRoomCategory = (id: string) =>
+    setRoomCategories((prev) => prev.filter((c) => c.id !== id))
 
   const value: AppState = {
     isLoading,
@@ -109,6 +122,10 @@ export const AppStoreProvider = ({ children }: { children: React.ReactNode }) =>
     breakfastSettings,
     savedSimulations,
     addSavedSimulation,
+    roomCategories,
+    addRoomCategory,
+    updateRoomCategory,
+    deleteRoomCategory,
   }
 
   return <AppStoreContext.Provider value={value}>{children}</AppStoreContext.Provider>

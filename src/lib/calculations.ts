@@ -89,6 +89,18 @@ export interface BreakfastSetting {
   components: BreakfastComponent[]
 }
 
+export interface RoomCategory {
+  id: string
+  propertyId: string
+  name: string
+  unitCount: number
+  weightFactor: number
+  laundryCostPerDay: number
+  amenitiesCostPerGuest: number
+  cleaningCostPerStay: number
+  breakfastCostPerPerson: number
+}
+
 export interface SavedSimulation {
   id: string
   propertyId: string
@@ -247,6 +259,132 @@ export function calculateEmptyRoomCost(property: Property, fixedCosts: FixedCost
   const availableDays = calculateAvailableDays(property)
   const totalFixed = fixedCosts.reduce((sum, c) => sum + c.amount, 0)
   return availableDays > 0 ? totalFixed / availableDays : 0
+}
+
+export function calculateCategoryVariableCostPerDay(category: RoomCategory): number {
+  const guestsPerRoom = DEFAULT_GUESTS_PER_ROOM
+  const avgStayNights = 3
+  return (
+    category.laundryCostPerDay +
+    category.amenitiesCostPerGuest * guestsPerRoom +
+    category.cleaningCostPerStay / avgStayNights +
+    category.breakfastCostPerPerson * guestsPerRoom
+  )
+}
+
+export function allocateFixedCosts(
+  categories: RoomCategory[],
+  totalFixed: number,
+): Record<string, number> {
+  const totalWeight = categories.reduce((sum, c) => sum + c.unitCount * c.weightFactor, 0)
+  const allocation: Record<string, number> = {}
+  for (const cat of categories) {
+    const share = totalWeight > 0 ? (cat.unitCount * cat.weightFactor) / totalWeight : 0
+    allocation[cat.id] = totalFixed * share
+  }
+  return allocation
+}
+
+export function calculateCategoryScenarioPrices(
+  category: RoomCategory,
+  allocatedFixed: number,
+  property: Property,
+  occupancyRate: number,
+  channel?: Channel,
+  paymentMethod?: PaymentMethod,
+): ScenarioResult {
+  const availableDays = category.unitCount * property.periodDays
+  const soldDays = availableDays * (occupancyRate / 100)
+  const fixedCostAbsorption = soldDays > 0 ? allocatedFixed / soldDays : 0
+  const variableCostPerDay = calculateCategoryVariableCostPerDay(category)
+  const commissionRate = (channel?.commissionPercent ?? 0) / 100
+  const paymentFeeRate = (paymentMethod?.feePercent ?? 0) / 100
+  const taxRate = property.taxRegime / 100
+  const marginRate = property.desiredMargin / 100
+  const totalDeduction = taxRate + commissionRate + paymentFeeRate
+
+  const sustainableDenom = Math.max(1 - totalDeduction, 0.01)
+  const sustainablePrice = (fixedCostAbsorption + variableCostPerDay) / sustainableDenom
+  const idealDenom = Math.max(1 - totalDeduction - marginRate, 0.01)
+  const idealPrice = (fixedCostAbsorption + variableCostPerDay) / idealDenom
+  const emergencyDenom = Math.max(1 - taxRate, 0.01)
+  const emergencyPrice = variableCostPerDay / emergencyDenom
+
+  const revenue = soldDays * idealPrice
+  const commission = revenue * commissionRate
+  const paymentFee = revenue * paymentFeeRate
+  const taxes = revenue * taxRate
+  const variableTotal = soldDays * variableCostPerDay
+  const profit = revenue - allocatedFixed - variableTotal - commission - paymentFee - taxes
+  const margin = revenue > 0 ? (profit / revenue) * 100 : 0
+
+  return {
+    availableDays,
+    soldDays,
+    fixedCostAbsorption,
+    variableCostPerDay,
+    emergencyPrice,
+    sustainablePrice,
+    idealPrice,
+    totalFixed: allocatedFixed,
+    revenue,
+    profit,
+    margin,
+  }
+}
+
+export function calculateCategoryReverseSimulation(
+  category: RoomCategory,
+  allocatedFixed: number,
+  property: Property,
+  grossPrice: number,
+  targetOccupancy: number,
+  channel?: Channel,
+  paymentMethod?: PaymentMethod,
+  sustainablePrice?: number,
+  idealPrice?: number,
+  emergencyPrice?: number,
+): ReverseResult {
+  const availableDays = category.unitCount * property.periodDays
+  const variableCostPerDay = calculateCategoryVariableCostPerDay(category)
+  const commissionRate = (channel?.commissionPercent ?? 0) / 100
+  const paymentFeeRate = (paymentMethod?.feePercent ?? 0) / 100
+  const taxRate = property.taxRegime / 100
+
+  const commissionAmount = grossPrice * commissionRate
+  const paymentFeeAmount = grossPrice * paymentFeeRate
+  const taxAmount = grossPrice * taxRate
+  const netRevenuePerDay = grossPrice - commissionAmount - paymentFeeAmount - taxAmount
+  const contributionMargin = netRevenuePerDay - variableCostPerDay
+  const equilibriumOccupancy =
+    contributionMargin > 0 ? (allocatedFixed / contributionMargin / availableDays) * 100 : 100
+
+  const soldDaysAtTarget = availableDays * (targetOccupancy / 100)
+  const profitAtTarget = contributionMargin * soldDaysAtTarget - allocatedFixed
+  const fixedAbsorptionAtTarget =
+    soldDaysAtTarget > 0 ? allocatedFixed / soldDaysAtTarget : allocatedFixed
+  const marginAtTarget =
+    grossPrice > 0
+      ? ((netRevenuePerDay - variableCostPerDay - fixedAbsorptionAtTarget) / grossPrice) * 100
+      : 0
+
+  let status: 'red' | 'yellow' | 'green' = 'red'
+  if (emergencyPrice && idealPrice) {
+    if (grossPrice >= idealPrice) status = 'green'
+    else if (grossPrice >= emergencyPrice) status = 'yellow'
+  }
+
+  return {
+    netRevenuePerDay,
+    contributionMargin,
+    equilibriumOccupancy: Math.min(equilibriumOccupancy, 100),
+    marginAtTarget,
+    profitAtTarget,
+    commissionAmount,
+    paymentFeeAmount,
+    taxAmount,
+    status,
+  }
 }
 
 export function calculateEquilibriumOccupancy(

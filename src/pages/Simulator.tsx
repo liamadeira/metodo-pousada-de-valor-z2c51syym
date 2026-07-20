@@ -1,8 +1,12 @@
 import { useState, useMemo } from 'react'
 import useAppStore from '@/stores/use-app-store'
-import { calculateScenarioPrices, calculateReverseSimulation } from '@/lib/calculations'
+import {
+  calculateCategoryScenarioPrices,
+  calculateCategoryReverseSimulation,
+  allocateFixedCosts,
+} from '@/lib/calculations'
 import { formatCurrency, formatPercent } from '@/lib/formatters'
-import { evaluatePrice } from '@/lib/price-utils'
+import { evaluatePriceWithEmergency } from '@/lib/price-utils'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Slider } from '@/components/ui/slider'
 import { Label } from '@/components/ui/label'
@@ -17,11 +21,11 @@ import {
 import { SmartAlert } from '@/components/SmartAlert'
 
 export default function Simulator() {
-  const { properties, currentPropertyId, fixedCosts, variableCosts, channels, paymentMethods } =
+  const { properties, currentPropertyId, fixedCosts, channels, paymentMethods, roomCategories } =
     useAppStore()
   const property = properties.find((p) => p.id === currentPropertyId)
   const propFixed = fixedCosts.filter((c) => c.propertyId === currentPropertyId)
-  const propVar = variableCosts.filter((c) => c.propertyId === currentPropertyId)
+  const propCategories = roomCategories.filter((c) => c.propertyId === currentPropertyId)
   const propChannels = channels.filter((c) => c.propertyId === currentPropertyId)
   const propPayments = paymentMethods.filter((pm) => pm.propertyId === currentPropertyId)
 
@@ -29,50 +33,86 @@ export default function Simulator() {
   const [occupancy, setOccupancy] = useState(50)
   const [margin, setMargin] = useState(property?.desiredMargin ?? 20)
   const [testPrice, setTestPrice] = useState(300)
+  const [categoryId, setCategoryId] = useState(propCategories[0]?.id ?? '')
   const [channelId, setChannelId] = useState(propChannels[0]?.id ?? '')
   const [paymentId, setPaymentId] = useState(propPayments[0]?.id ?? '')
 
+  const selectedCategory = propCategories.find((c) => c.id === categoryId)
   const selectedChannel = propChannels.find((c) => c.id === channelId)
   const selectedPayment = propPayments.find((pm) => pm.id === paymentId)
 
+  const totalFixed = useMemo(() => propFixed.reduce((s, c) => s + c.amount, 0), [propFixed])
+  const allocation = useMemo(
+    () => allocateFixedCosts(propCategories, totalFixed),
+    [propCategories, totalFixed],
+  )
+
   const directResult = useMemo(() => {
-    if (!property) return null
-    return calculateScenarioPrices(
+    if (!property || !selectedCategory) return null
+    const allocated = allocation[selectedCategory.id] ?? 0
+    return calculateCategoryScenarioPrices(
+      selectedCategory,
+      allocated,
       { ...property, desiredMargin: margin },
-      propFixed,
-      propVar,
       occupancy,
       selectedChannel,
       selectedPayment,
     )
-  }, [property, propFixed, propVar, occupancy, margin, selectedChannel, selectedPayment])
+  }, [property, selectedCategory, allocation, occupancy, margin, selectedChannel, selectedPayment])
 
   const reverseResult = useMemo(() => {
-    if (!property || !directResult) return null
-    return calculateReverseSimulation(
-      property,
-      propFixed,
-      propVar,
+    if (!property || !selectedCategory || !directResult) return null
+    const allocated = allocation[selectedCategory.id] ?? 0
+    return calculateCategoryReverseSimulation(
+      selectedCategory,
+      allocated,
+      { ...property, desiredMargin: margin },
       testPrice,
       occupancy,
       selectedChannel,
       selectedPayment,
       directResult.sustainablePrice,
       directResult.idealPrice,
+      directResult.emergencyPrice,
     )
   }, [
     property,
-    propFixed,
-    propVar,
+    selectedCategory,
+    allocation,
     testPrice,
     occupancy,
     selectedChannel,
     selectedPayment,
     directResult,
+    margin,
   ])
 
-  if (!property || !directResult || !reverseResult) return null
+  if (!property || !directResult || !reverseResult || !selectedCategory) return null
 
+  const evaluation = evaluatePriceWithEmergency(
+    testPrice,
+    directResult.emergencyPrice,
+    directResult.sustainablePrice,
+    directResult.idealPrice,
+  )
+
+  const categorySelect = (
+    <div className="space-y-2">
+      <Label>Categoria de Quarto</Label>
+      <Select value={categoryId} onValueChange={setCategoryId}>
+        <SelectTrigger>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {propCategories.map((c) => (
+            <SelectItem key={c.id} value={c.id}>
+              {c.name} ({c.unitCount} un.)
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  )
   const channelSelect = (
     <div className="space-y-2">
       <Label>Canal de Venda</Label>
@@ -111,9 +151,9 @@ export default function Simulator() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Simulador de Preços</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Simulador de Preços por Categoria</h1>
         <p className="text-muted-foreground">
-          Modo direto (encontrar preço) ou reverso (testar preço).
+          Simulação direta ou reversa para cada tipo de quarto.
         </p>
       </div>
 
@@ -129,6 +169,7 @@ export default function Simulator() {
               <CardTitle>{mode === 'direct' ? 'Variáveis de Cálculo' : 'Preço de Teste'}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
+              {categorySelect}
               {mode === 'direct' ? (
                 <>
                   <div className="space-y-4">
@@ -196,7 +237,7 @@ export default function Simulator() {
           <TabsContent value="direct" className="mt-0">
             <Card className="bg-slate-900 text-slate-50 dark:bg-card dark:text-card-foreground">
               <CardHeader>
-                <CardTitle>Preços Recomendados</CardTitle>
+                <CardTitle>Preços Recomendados — {selectedCategory.name}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex justify-between border-b border-slate-800 dark:border-border pb-3">
@@ -223,8 +264,12 @@ export default function Simulator() {
                     <span>{Math.round(directResult.soldDays)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Custo fixo/diária</span>
+                    <span>Custo fixo alocado/diária</span>
                     <span>{formatCurrency(directResult.fixedCostAbsorption)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Custo variável/diária</span>
+                    <span>{formatCurrency(directResult.variableCostPerDay)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Lucro projetado</span>
@@ -242,15 +287,12 @@ export default function Simulator() {
           <TabsContent value="reverse" className="mt-0 space-y-4">
             <SmartAlert
               status={reverseResult.status}
-              title={`Avaliação: ${evaluatePrice(testPrice, directResult.sustainablePrice, directResult.idealPrice).label}`}
-              description={
-                evaluatePrice(testPrice, directResult.sustainablePrice, directResult.idealPrice)
-                  .description
-              }
+              title={`Avaliação: ${evaluation.label}`}
+              description={evaluation.description}
             />
             <Card>
               <CardHeader>
-                <CardTitle>Análise do Preço</CardTitle>
+                <CardTitle>Análise do Preço — {selectedCategory.name}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex justify-between border-b pb-2">

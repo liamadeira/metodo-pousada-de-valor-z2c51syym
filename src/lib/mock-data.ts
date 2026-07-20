@@ -8,6 +8,7 @@ import type {
   LaundryPiece,
   LaundryKit,
   BreakfastSetting,
+  RoomCategory,
 } from '@/lib/calculations'
 
 export const initialProperties: Property[] = [
@@ -88,6 +89,42 @@ export const initialLaundryKits: LaundryKit[] = [
       { pieceId: 'lp6', quantity: 2 },
       { pieceId: 'lp7', quantity: 1 },
     ],
+  },
+]
+
+export const initialRoomCategories: RoomCategory[] = [
+  {
+    id: 'rc1',
+    propertyId: 'p1',
+    name: 'Standard',
+    unitCount: 8,
+    weightFactor: 1.0,
+    laundryCostPerDay: 8.5,
+    amenitiesCostPerGuest: 4,
+    cleaningCostPerStay: 15,
+    breakfastCostPerPerson: 18,
+  },
+  {
+    id: 'rc2',
+    propertyId: 'p1',
+    name: 'Luxo',
+    unitCount: 5,
+    weightFactor: 1.5,
+    laundryCostPerDay: 12,
+    amenitiesCostPerGuest: 8,
+    cleaningCostPerStay: 20,
+    breakfastCostPerPerson: 22,
+  },
+  {
+    id: 'rc3',
+    propertyId: 'p1',
+    name: 'Suíte',
+    unitCount: 2,
+    weightFactor: 2.0,
+    laundryCostPerDay: 18,
+    amenitiesCostPerGuest: 15,
+    cleaningCostPerStay: 30,
+    breakfastCostPerPerson: 28,
   },
 ]
 

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import useAppStore from '@/stores/use-app-store'
-import { calculateScenarioPrices } from '@/lib/calculations'
+import { calculateCategoryScenarioPrices, allocateFixedCosts } from '@/lib/calculations'
 import { formatCurrency, formatPercent } from '@/lib/formatters'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -22,58 +22,110 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
+import { CategoryPriceTable } from '@/components/CategoryPriceTable'
 
 export default function Commercial() {
-  const { properties, currentPropertyId, fixedCosts, variableCosts, channels, paymentMethods } =
+  const { properties, currentPropertyId, fixedCosts, channels, paymentMethods, roomCategories } =
     useAppStore()
   const property = properties.find((p) => p.id === currentPropertyId)
   const propFixed = fixedCosts.filter((c) => c.propertyId === currentPropertyId)
-  const propVar = variableCosts.filter((c) => c.propertyId === currentPropertyId)
+  const propCategories = roomCategories.filter((c) => c.propertyId === currentPropertyId)
   const propChannels = channels.filter((c) => c.propertyId === currentPropertyId)
   const propPayments = paymentMethods.filter((pm) => pm.propertyId === currentPropertyId)
+  const [selectedCategoryId, setSelectedCategoryId] = useState(propCategories[0]?.id ?? '')
   const [selectedPaymentId, setSelectedPaymentId] = useState(propPayments[0]?.id ?? '')
 
+  const selectedCategory = propCategories.find((c) => c.id === selectedCategoryId)
   const selectedPayment = propPayments.find((pm) => pm.id === selectedPaymentId)
   const directChannel = propChannels.find((c) => c.name === 'Venda Direta')
 
-  const basePrices = useMemo(() => {
-    if (!property) return null
-    return calculateScenarioPrices(property, propFixed, propVar, 50, directChannel, selectedPayment)
-  }, [property, propFixed, propVar, directChannel, selectedPayment])
+  const totalFixed = useMemo(() => propFixed.reduce((s, c) => s + c.amount, 0), [propFixed])
+  const allocation = useMemo(
+    () => allocateFixedCosts(propCategories, totalFixed),
+    [propCategories, totalFixed],
+  )
 
-  if (!property || !basePrices) return null
+  const basePrices = useMemo(() => {
+    if (!property || !selectedCategory) return null
+    const allocated = allocation[selectedCategory.id] ?? 0
+    return calculateCategoryScenarioPrices(
+      selectedCategory,
+      allocated,
+      property,
+      50,
+      directChannel,
+      selectedPayment,
+    )
+  }, [property, selectedCategory, allocation, directChannel, selectedPayment])
+
+  if (!property || !basePrices || !selectedCategory) return null
+
+  const priceCards = [
+    {
+      label: 'Preço de Emergência',
+      price: basePrices.emergencyPrice,
+      color: 'rose',
+      icon: XOctagon,
+      desc: 'Abaixo disso é prejuízo',
+    },
+    {
+      label: 'Preço Sustentável',
+      price: basePrices.sustainablePrice,
+      color: 'amber',
+      icon: AlertTriangle,
+      desc: 'Ponto de equilíbrio',
+    },
+    {
+      label: 'Preço Ideal',
+      price: basePrices.idealPrice,
+      color: 'emerald',
+      icon: CheckCircle2,
+      desc: `Foco (${property.desiredMargin}%)`,
+    },
+  ]
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Comercial & Formação de Preços</h1>
-        <p className="text-muted-foreground">Canais, pagamentos e preços de referência.</p>
+        <p className="text-muted-foreground">Preços de referência por categoria de quarto.</p>
+      </div>
+
+      <div className="flex flex-wrap items-end gap-4">
+        <div className="space-y-2 w-64">
+          <Label>Categoria de Quarto</Label>
+          <Select value={selectedCategoryId} onValueChange={setSelectedCategoryId}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {propCategories.map((cat) => (
+                <SelectItem key={cat.id} value={cat.id}>
+                  {cat.name} ({cat.unitCount} un.)
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2 w-64">
+          <Label>Forma de Pagamento</Label>
+          <Select value={selectedPaymentId} onValueChange={setSelectedPaymentId}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {propPayments.map((pm) => (
+                <SelectItem key={pm.id} value={pm.id}>
+                  {pm.name} ({pm.feePercent}%)
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <div className="grid gap-6 md:grid-cols-3">
-        {[
-          {
-            label: 'Preço de Emergência',
-            price: basePrices.emergencyPrice,
-            color: 'rose',
-            icon: XOctagon,
-            desc: 'Nunca venda abaixo disso',
-          },
-          {
-            label: 'Preço Sustentável',
-            price: basePrices.sustainablePrice,
-            color: 'amber',
-            icon: AlertTriangle,
-            desc: 'Ponto de equilíbrio exato',
-          },
-          {
-            label: 'Preço Ideal',
-            price: basePrices.idealPrice,
-            color: 'emerald',
-            icon: CheckCircle2,
-            desc: `Foco de vendas (${property.desiredMargin}%)`,
-          },
-        ].map((card) => (
+        {priceCards.map((card) => (
           <Card
             key={card.label}
             className={`border-${card.color}-200 dark:border-${card.color}-900 bg-${card.color}-50/50 dark:bg-${card.color}-950/20`}
@@ -107,33 +159,35 @@ export default function Commercial() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Comparação de Canais e Formas de Pagamento</CardTitle>
-          <CardDescription>Veja o impacto de comissões e taxas no preço ideal.</CardDescription>
+          <CardTitle>Cenários por Categoria</CardTitle>
+          <CardDescription>
+            Preço ideal para cada categoria em diferentes níveis de ocupação.
+          </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-end gap-4">
-            <div className="space-y-2 w-64">
-              <Label>Forma de Pagamento</Label>
-              <Select value={selectedPaymentId} onValueChange={setSelectedPaymentId}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {propPayments.map((pm) => (
-                    <SelectItem key={pm.id} value={pm.id}>
-                      {pm.name} ({pm.feePercent}%)
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+        <CardContent>
+          <CategoryPriceTable
+            property={property}
+            categories={propCategories}
+            fixedCosts={propFixed}
+            channel={directChannel}
+            paymentMethod={selectedPayment}
+          />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Comparação de Canais — {selectedCategory.name}</CardTitle>
+          <CardDescription>
+            Impacto de comissões e taxas no preço ideal da categoria.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Canal</TableHead>
                 <TableHead className="text-right">Comissão</TableHead>
-                <TableHead className="text-right">Taxa Pagamento</TableHead>
                 <TableHead className="text-right">Preço Sugerido</TableHead>
                 <TableHead className="text-right">Receita Líquida</TableHead>
                 <TableHead className="text-right">Consumo da Margem</TableHead>
@@ -141,23 +195,23 @@ export default function Commercial() {
             </TableHeader>
             <TableBody>
               {propChannels.map((channel) => {
-                const result = calculateScenarioPrices(
+                const allocated = allocation[selectedCategory.id] ?? 0
+                const result = calculateCategoryScenarioPrices(
+                  selectedCategory,
+                  allocated,
                   property,
-                  propFixed,
-                  propVar,
                   50,
                   channel,
                   selectedPayment,
                 )
-                const suggestedPrice = result.idealPrice
                 const netRevenue =
-                  suggestedPrice *
+                  result.idealPrice *
                   (1 -
                     channel.commissionPercent / 100 -
                     (selectedPayment?.feePercent ?? 0) / 100 -
                     property.taxRegime / 100)
                 const marginConsumed =
-                  suggestedPrice > 0 ? (1 - netRevenue / suggestedPrice) * 100 : 0
+                  result.idealPrice > 0 ? (1 - netRevenue / result.idealPrice) * 100 : 0
                 return (
                   <TableRow key={channel.id}>
                     <TableCell className="font-medium">{channel.name}</TableCell>
@@ -166,11 +220,8 @@ export default function Commercial() {
                         {formatPercent(channel.commissionPercent)}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-right">
-                      {formatPercent(selectedPayment?.feePercent ?? 0)}
-                    </TableCell>
                     <TableCell className="text-right font-bold text-primary">
-                      {formatCurrency(suggestedPrice)}
+                      {formatCurrency(result.idealPrice)}
                     </TableCell>
                     <TableCell className="text-right">{formatCurrency(netRevenue)}</TableCell>
                     <TableCell className="text-right">
@@ -189,57 +240,6 @@ export default function Commercial() {
                   </TableRow>
                 )
               })}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Preço Equivalente entre Canais</CardTitle>
-          <CardDescription>
-            Quanto cobrar em cada canal para obter a mesma receita líquida da Venda Direta.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Canal</TableHead>
-                <TableHead className="text-right">Receita Alvo (Direta)</TableHead>
-                <TableHead className="text-right">Preço Equivalente</TableHead>
-                <TableHead className="text-right">Diferença</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(() => {
-                const directNet =
-                  basePrices.idealPrice *
-                  (1 - 0 - (selectedPayment?.feePercent ?? 0) / 100 - property.taxRegime / 100)
-                return propChannels.map((channel) => {
-                  const totalDeduction =
-                    channel.commissionPercent / 100 +
-                    (selectedPayment?.feePercent ?? 0) / 100 +
-                    property.taxRegime / 100
-                  const equivalentPrice = totalDeduction < 1 ? directNet / (1 - totalDeduction) : 0
-                  const diff = equivalentPrice - basePrices.idealPrice
-                  return (
-                    <TableRow key={channel.id}>
-                      <TableCell className="font-medium">{channel.name}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(directNet)}</TableCell>
-                      <TableCell className="text-right font-bold">
-                        {formatCurrency(equivalentPrice)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Badge variant={diff > 0 ? 'destructive' : 'default'}>
-                          {diff > 0 ? '+' : ''}
-                          {formatCurrency(diff)}
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
-                  )
-                })
-              })()}
             </TableBody>
           </Table>
         </CardContent>
